@@ -1,6 +1,6 @@
 """
 AgSaathi — Smart Farming Assistant
-Student: ZENE SOPJIE ANAND | Wacp no: 1000414
+Student: ZENE SOPHIE ANAND | Wacp no: 1000414
 Assessment: FA-2 | Course: Generative AI | School: Aspee Nutan Academy
 """
 
