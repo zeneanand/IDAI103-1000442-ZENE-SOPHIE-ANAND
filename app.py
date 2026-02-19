@@ -1,6 +1,6 @@
 """
 AgSaathi — Smart Farming Assistant
-Student: Aditya Jitendra Kumar Sahani | Wacp no: 1000414
+Student: ZENE SOPJIE ANAND | Wacp no: 1000414
 Assessment: FA-2 | Course: Generative AI | School: Aspee Nutan Academy
 """
 
