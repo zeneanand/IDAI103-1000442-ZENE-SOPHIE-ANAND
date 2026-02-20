@@ -1,6 +1,6 @@
 """
 AgSaathi — Smart Farming Assistant
-Student: Zene Sophie Anand | Wacp no: 1000442
+Student: zene sophie anand  | Wacp no: 1000414
 Assessment: FA-2 | Course: Generative AI | School: Aspee Nutan Academy
 """
 
@@ -8,670 +8,313 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import re
-import csv
-import io
 from datetime import datetime
 from typing import Dict, Any, Optional
 
 # ── PAGE CONFIG ──────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="AgSaathi — Smart Farming Assistant",
-    page_icon="🌿",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="AgSaathi — Smart Farming Assistant", page_icon="🌿", layout="wide", initial_sidebar_state="expanded")
 
 # ── GEMINI SETUP ────────────────────────────────────────────────────────────
-# I implemented security best practices by loading API key from secrets
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", None)
-
 if not GEMINI_API_KEY:
     st.error("⚠️ Gemini API key not found. Please add GEMINI_API_KEY to your Streamlit secrets.")
-    st.info("**How to fix:**\n1. Create `.streamlit/secrets.toml`\n2. Add: `GEMINI_API_KEY = \"your_key_here\"`")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
-
-# ── MODEL CONFIG ────────────────────────────────────────────────────────────
-# In official document it is mentioned to gemini 1.5 but all model is discontinue so I set this to 'gemini-3-flash-preview' as required 
-# Note: If this model is not available, the app will show an error with fallback suggestions
 MODEL_NAME = "gemini-3-flash-preview" 
-MODEL_TEMPERATURE = 0.3  # I chose 0.3 for balanced creativity and accuracy
-MODEL_MAX_TOKENS = 2048
+MODEL_TEMPERATURE = 0.3
 
 @st.cache_resource
 def get_model():
-    """I cached the model to avoid reloading it on every interaction."""
-    try:
-        return genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            generation_config=genai.GenerationConfig(
-                temperature=MODEL_TEMPERATURE,
-                max_output_tokens=MODEL_MAX_TOKENS,
-            )
-        )
-    except Exception as e:
-        st.error(f"❌ Model '{MODEL_NAME}' not available. Error: {str(e)[:200]}")
-        st.info("💡 Try using 'gemini-1.5-flash' instead in MODEL_NAME variable")
-        return None
+    return genai.GenerativeModel(model_name=MODEL_NAME, generation_config=genai.GenerationConfig(temperature=MODEL_TEMPERATURE))
 
 # ── GEO DATA ────────────────────────────────────────────────────────────────
 GEO = {
-    'India 🇮🇳': {
-        'languages': ['English', 'Hindi'],
-        'states': ['Uttar Pradesh', 'Punjab', 'Bihar', 'Madhya Pradesh', 'Rajasthan', 'Haryana', 'Gujarat'],
-    },
-    'Canada 🇨🇦': {
-        'languages': ['English', 'French'],
-        'states': ['Ontario', 'Quebec', 'Saskatchewan', 'Alberta'],
-    },
-    'Ghana 🇬🇭': {
-        'languages': ['English'],
-        'states': ['Ashanti', 'Northern', 'Greater Accra', 'Volta'],
-    },
-}
-
-# ── STORYBOARD ALIGNED PROMPTS (Panels 3-7) ─────────────────────────────────
-# I aligned these prompts exactly with my FA-1 Storyboard for consistency
-FEATURE_PROMPTS = {
-    "crop_rec": [
-        "Barabanki mein November mein gehu ki kaun si kism boyein?",
-        "What should I grow in July in Uttar Pradesh given monsoon rainfall?",
-    ],
-    "pest": [
-        "Aalu ke patton par kaale dhabbe, kaise ilaaj karein?",
-        "Organic treatment for aphids on mustard in Punjab.",
-    ],
-    "weather": [
-        "Is hafte barsaat hogi? Dhan ki katai kab karein?",
-        "Heavy rain forecast. Should I harvest sugarcane today?",
-    ],
-    "soil": [
-        "Meri mitti mein pH 7.8 hai, gehu ke liye khad ki matra kya ho?",
-        "How much gypsum for 1 acre of alkaline soil (pH 10.5)?",
-    ],
-    "sustainable": [
-        "Arhar mein fuliya keeda lage to organic ilaaj?",
-        "Alternatives to stubble burning that improve soil health.",
-    ],
+    'India 🇮🇳': {'languages': ['English', 'Hindi'], 'states': ['Uttar Pradesh', 'Punjab', 'Bihar', 'Madhya Pradesh', 'Maharashtra', 'Gujarat']},
+    'Canada 🇨🇦': {'languages': ['English', 'French'], 'states': ['Ontario', 'Quebec', 'Saskatchewan', 'Alberta']},
+    'Ghana 🇬🇭': {'languages': ['English'], 'states': ['Ashanti', 'Northern', 'Greater Accra', 'Volta']},
 }
 
 # ── SESSION STATE ───────────────────────────────────────────────────────────
-DEFAULTS = {
-    'page': 'hero', 'country': None, 'state': None, 'language': 'Hindi',
-    'nav': 'home', 'chat': [], 'history': [], 'stats': {'queries': 0},
-    'user_query': None, 'validation_results': {}, 'query_log': [],
-    'onboarding_complete': False
-}
+DEFAULTS = {'page': 'hero', 'country': None, 'state': None, 'language': 'Hindi', 'nav': 'home', 'stats': {'queries': 0}, 'onboarding_complete': False}
 for k, v in DEFAULTS.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+    if k not in st.session_state: st.session_state[k] = v
 
-# ── HELPERS ─────────────────────────────────────────────────────────────────
-def call_gemini(prompt: str) -> str:
-    """I created this helper to handle API errors gracefully."""
+# ── AI HELPER ───────────────────────────────────────────────────────────────
+def call_ai(prompt: str) -> Optional[Dict]:
     try:
-        m = get_model()
-        if m is None:
-            return ""
-        resp = m.generate_content(prompt)
-        return resp.text if resp.text else ""
+        resp = get_model().generate_content(prompt).text
+        text = re.sub(r'```json|```', '', resp).strip()
+        start, end = text.find('{'), text.rfind('}') + 1
+        if start != -1:
+            st.session_state.stats['queries'] += 1
+            return json.loads(text[start:end])
     except Exception as e:
-        err = str(e)
-        if "404" in err or "not found" in err.lower():
-            st.error(f"❌ **Model not found:** `{MODEL_NAME}`. Try 'gemini-1.5-flash'")
-        elif "403" in err or "permission" in err.lower():
-            st.error("❌ **Permission denied.** Check GEMINI_API_KEY in secrets.")
-        else:
-            st.error(f"❌ **API Error:** {err[:200]}")
-        return ""
+        st.error(f"⚠️ AI Parsing Error. Please try again.")
+    return None
 
-def build_structured_prompt(user_query: str, state: str, language: str) -> str:
-    """
-    I engineered this prompt to handle location conflicts gracefully.
-    If user asks about Barabanki but selected Punjab, AI will clarify.
-    """
-    return f"""You are AgSaathi, an expert agricultural assistant.
-LANGUAGE RULE: Respond ENTIRELY in {language}. Technical terms (pH, NPK) can be English.
-JSON RULE: Return ONLY valid JSON. No markdown, no text outside JSON.
+def render_confidence_bar(score: int):
+    color = "#27AE60" if score >= 80 else "#E67E22" if score >= 50 else "#C0392B"
+    st.markdown(f"""
+    <div style='margin-top:15px;'>
+        <div style='display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px; color:var(--wheat);'>
+            <span>AI Confidence Score</span><span>{score}%</span>
+        </div>
+        <div style='width:100%; background:rgba(255,255,255,0.1); border-radius:5px; height:8px;'>
+            <div style='width:{score}%; background:{color}; height:100%; border-radius:5px; transition:1s;'></div>
+        </div>
+    </div>""", unsafe_allow_html=True)
 
-Context:
-- User Selected State: {state}
-- Farmer Question: "{user_query}"
-
-Instructions:
-1. Analyze the question. If the user mentions a specific district (e.g., Barabanki) that differs from the Selected State ({state}), acknowledge this difference but provide advice relevant to the SPECIFIC DISTRICT mentioned in the question if possible, or clarify the region.
-2. Provide 3 actionable recommendations.
-3. Include a 'reason' for each.
-4. Include a 'safety_note'.
-5. Include a 'confidence_score' (0-100).
-
-JSON STRUCTURE:
-{{
-    "location_analysis": "Brief context clarifying the region",
-    "recommendations": [
-        {{"action": "Step 1", "reason": "Why this works", "risk_level": "LOW"}},
-        {{"action": "Step 2", "reason": "Why this works", "risk_level": "MEDIUM"}},
-        {{"action": "Step 3", "reason": "Why this works", "risk_level": "LOW"}}
-    ],
-    "safety_note": "Critical safety warning",
-    "confidence_score": 85
-}}"""
-
-def parse_structured_response(raw: str) -> Optional[Dict]:
-    """I added robust parsing because LLMs sometimes add markdown code fences."""
-    if not raw:
-        return None
-    text = re.sub(r'```json|```', '', raw).strip()
-    try:
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        if start == -1:
-            return None
-        return json.loads(text[start:end])
-    except json.JSONDecodeError:
-        return {
-            "location_analysis": "AI Response",
-            "recommendations": [{"action": raw[:300], "reason": "See raw text", "risk_level": "LOW"}],
-            "safety_note": "Verify with local expert",
-            "confidence_score": 50
-        }
-
-def ai_farming_advice(query: str) -> Dict[str, Any]:
-    """Main AI call with auto-retry."""
-    state = st.session_state.state
-    language = st.session_state.language
-    prompt = build_structured_prompt(query, state, language)
-    raw = call_gemini(prompt)
-    structured = parse_structured_response(raw)
-    
-    # Auto-retry once if parsing failed
-    if not structured:
-        retry_prompt = f"Return ONLY JSON in {language}. Question: {query}"
-        raw = call_gemini(retry_prompt)
-        structured = parse_structured_response(raw)
-    
-    st.session_state.query_log.append({
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'query': query[:120], 'state': state, 'language': language, 'json_ok': bool(structured),
-    })
-    
-    return {'raw': raw, 'structured': structured, 'confidence_score': structured.get('confidence_score', 0) if structured else 0}
-
-# ── ENHANCED CSS────────────────────────────────
+# ── CSS ─────────────────────────────────────────────────────────────────────
 def inject_css():
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Nunito+Sans:wght@400;600;700&display=swap');
-    :root{--soil:#1A0F07;--wheat:#E8C97A;--sage:#7A9E7E;--cream:#F5EDD8;--straw:#D4A853;}
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Nunito+Sans:wght@300;400;600;700&display=swap');
+    :root { --soil: #1A0F07; --wheat: #E8C97A; --cream: #FDF6E3; --sage: #4A7C59; }
+    [data-testid="stSidebarNav"] + div { display: none !important; }
+    button[title="Collapse sidebar"] { color: var(--wheat) !important; }
+    html, body, [data-testid="stAppViewContainer"] { background: #121212 !important; color: var(--cream) !important; font-family: 'Nunito Sans', sans-serif;}
+    h1, h2, h3 { font-family: 'Playfair Display', serif !important; color: var(--wheat) !important; }
     
-    /* GLOBAL BACKGROUND & TEXT */
-    html,body,[data-testid="stAppViewContainer"]{background:linear-gradient(158deg,#140D07 0%,#261408 100%)!important;color:var(--cream)!important;}
-    h1,h2,h3,p,span,label,div,.stMarkdown{color:var(--cream)!important;font-family:'Nunito Sans',sans-serif!important;}
-    h1,h2,h3{font-family:'Playfair Display',serif!important;color:var(--wheat)!important;}
+    .hero-container { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-height: 50vh; margin-top: 5vh; }
+    .hero-title { font-family: 'Playfair Display', serif !important; font-size: 4.5rem !important; color: var(--wheat) !important; margin: 0 !important; }
     
-    /* DROPDOWN VISIBILITY - Enhanced for all browsers */
-    ul[role="listbox"], div[role="listbox"] {
-        background-color: #2C1810 !important;
-        border: 1px solid rgba(212,168,83,.35) !important;
-        border-radius: 10px !important;
-        color: var(--cream) !important;
-        z-index: 9999 !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,.4) !important;
-    }
-    li[role="option"], [data-baseweb="option"] {
-        background-color: #2C1810 !important;
-        color: var(--cream) !important;
-        font-family: 'Nunito Sans', sans-serif !important;
-        padding: 12px 16px !important;
-    }
-    li[role="option"]:hover, [data-baseweb="option"]:hover {
-        background-color: rgba(212,168,83,.18) !important;
-        color: var(--wheat) !important;
-    }
-    [aria-selected="true"] {
-        background-color: rgba(74,124,89,.3) !important;
-        color: var(--wheat) !important;
-    }
-    [data-testid="stSelectbox"] > div > div {
-        background: rgba(44,24,16,.92) !important;
-        border: 1px solid rgba(212,168,83,.32) !important;
-        border-radius: 10px !important;
-        color: var(--cream) !important;
-        min-height: 48px !important;
-    }
-    [data-testid="stSelectbox"] label {
-        color: var(--cream) !important;
-    }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 15px; padding: 25px; margin-bottom: 15px; }
+    .feature-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 20px; text-align: center; transition: 0.3s; height: 100%; }
+    .feature-card:hover { border-color: var(--wheat); transform: translateY(-5px); background: rgba(232,201,122,0.05); }
     
-    /* SPACING & LAYOUT - Increased all gaps */
-    .main .block-container {
-        padding-top: 3rem !important;
-        padding-bottom: 3rem !important;
-    }
-    .srow {
-        display: flex;
-        gap: 24px !important; /* Increased from 20px */
-        margin: 35px 0 !important; /* Increased from 30px */
-    }
-    .sbox {
-        background: rgba(245,237,216,.038);
-        border: 1px solid rgba(212,168,83,.16);
-        border-radius: 12px;
-        padding: 28px 16px !important; /* Increased padding */
-        text-align: center;
-        transition: all .25s ease;
-    }
-    .sbox:hover {
-        background: rgba(212,168,83,.07);
-        border-color: rgba(212,168,83,.36);
-        transform: translateY(-3px);
-    }
-    .snum {
-        font-family:'Playfair Display',serif;
-        font-size:2.1rem;
-        font-weight:900;
-        color:var(--wheat)!important;
-        line-height:1;
-        margin-bottom:5px;
-    }
-    .slb {
-        font-family:'DM Mono',monospace;
-        font-size:.6rem;
-        letter-spacing:2px;
-        text-transform:uppercase;
-        color:rgba(212,168,83,.6)!important;
-    }
+    .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; display: inline-block; margin-bottom: 5px; }
+    .risk-LOW { background: #27AE60; color: #fff; } .risk-MEDIUM { background: #E67E22; color: #fff; } .risk-HIGH { background: #C0392B; color: #fff; }
     
-    /* FEATURE CARDS SPACING */
-    .fc-container {
-        display: flex;
-        gap: 24px !important; /* Increased from 20px */
-        margin-bottom: 35px !important; /* Increased from 30px */
-    }
-    .fc {
-        background: rgba(245,237,216,.038);
-        border: 1px solid rgba(212,168,83,.17);
-        border-radius: 12px;
-        padding: 35px 24px !important; /* Increased padding */
-        height: 100%;
-        transition: all .28s ease;
-        flex: 1;
-    }
-    .fc:hover {
-        background: rgba(245,237,216,.07);
-        border-color: rgba(212,168,83,.37);
-        transform: translateY(-4px);
-        box-shadow: 0 12px 30px rgba(0,0,0,.25);
-    }
-    .fi { font-size: 2.2rem; margin-bottom: 15px; display: block; }
-    
-    /* AI RESPONSE CARDS */
-    .ai-card {
-        background: rgba(74,124,89,.12);
-        border: 1px solid rgba(122,158,126,.26);
-        border-radius: 12px;
-        padding: 22px; /* Increased padding */
-        margin-bottom: 18px; /* Increased from 15px */
-    }
-    .risk-badge {
-        display: inline-block;
-        padding: 5px 12px;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        margin-bottom: 10px;
-    }
-    .risk-low { background: #27AE60; color: #fff; }
-    .risk-med { background: #E67E22; color: #fff; }
-    
-    /* BUTTONS */
-    .stButton>button {
-        background: transparent !important;
-        border: 1px solid var(--straw) !important;
-        color: var(--wheat) !important;
-        transition: all 0.3s ease !important;
-        border-radius: 8px !important;
-        padding: 12px 24px !important; /* Increased padding */
-        margin-top: 12px !important; /* Increased from 10px */
-    }
-    .stButton>button:hover {
-        background: var(--wheat) !important;
-        color: var(--soil) !important;
-        transform: translateY(-2px) !important;
-    }
-    
-    /* HERO & INPUTS */
-    .hero-box {
-        background: rgba(245,237,216,.03);
-        border: 1px solid var(--straw);
-        border-radius: 20px;
-        padding: 55px; /* Increased from 50px */
-        text-align: center;
-        margin-bottom: 45px; /* Increased from 40px */
-    }
-    [data-testid="stTextInput"] input {
-        background: rgba(44,24,16,.85) !important;
-        border: 1px solid rgba(212,168,83,.26) !important;
-        color: var(--cream) !important;
-        padding: 14px !important; /* Increased from 12px */
-        font-size: 1rem !important;
-    }
-    [data-testid="stTextInput"] input::placeholder {
-        color: rgba(245,237,216,.4) !important;
-    }
-    
-    /* EXAMPLE BUTTONS */
-    .example-btn {
-        background: rgba(245,237,216,.05) !important;
-        border: 1px solid rgba(212,168,83,.2) !important;
-        border-radius: 8px !important;
-        padding: 10px 16px !important;
-        font-size: 0.85rem !important;
-        white-space: normal !important;
-        height: auto !important;
-        min-height: 50px !important;
-    }
-    .example-btn:hover {
-        background: rgba(212,168,83,.15) !important;
-        border-color: var(--wheat) !important;
-    }
+    .stButton>button { background: transparent !important; border: 2px solid var(--wheat) !important; color: var(--wheat) !important; border-radius: 50px !important; font-weight: 700 !important; transition: 0.3s; }
+    .stButton>button:hover { background: var(--wheat) !important; color: var(--soil) !important; box-shadow: 0 0 15px rgba(232,201,122,0.3); }
     </style>
     """, unsafe_allow_html=True)
 
 # ── ONBOARDING PAGES ────────────────────────────────────────────────────────
 def page_hero():
-    st.markdown(f"""
-    <div class='hero-box'>
-        <h1 style='font-size:3rem;margin-bottom:10px;'>🌿 AgSaathi</h1>
-        <p style='font-size:1.2rem;color:rgba(245,237,216,.7);'>Smart Farming Assistant for Farmers</p>
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("🌾 Begin — Select Your Location →", use_container_width=True):
-        st.session_state.page = 'country'
-        st.rerun()
+    st.markdown("<div class='hero-container'><div style='font-size:6rem;'>🌿</div><h1 class='hero-title'>AgSaathi</h1><p style='font-size:1.4rem; opacity:0.7;'>Your Intelligent Agricultural Companion</p></div>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🚀 GET STARTED", use_container_width=True):
+            st.session_state.page = 'country'; st.rerun()
 
 def page_country():
-    st.markdown(f"<h1>Where is your farm?</h1>", unsafe_allow_html=True)
-    countries = ['India 🇮🇳', 'Canada 🇨🇦', 'Ghana 🇬🇭']
+    st.markdown("<h1 style='text-align:center; padding-top:50px;'>Where is your farm?</h1>", unsafe_allow_html=True)
     cols = st.columns(3)
-    for i, c in enumerate(countries):
+    for i, c in enumerate(['India 🇮🇳', 'Canada 🇨🇦', 'Ghana 🇬🇭']):
         with cols[i]:
-            if st.button(c, use_container_width=True, key=f"country_{c}"):
-                st.session_state.country = c
-                st.session_state.state = None
-                st.session_state.page = 'state'
-                st.rerun()
+            if st.button(c, use_container_width=True):
+                st.session_state.country, st.session_state.page = c, 'state'; st.rerun()
 
 def page_state():
-    st.markdown(f"<h1>Which state are you in?</h1>", unsafe_allow_html=True)
-    if not st.session_state.country:
-        st.session_state.page = 'country'
-        st.rerun()
-    
-    d = GEO[st.session_state.country]
-    sel = st.selectbox("Select your state/region", options=d['states'], index=None, key="state_select")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("← Back"):
-            st.session_state.page = 'country'
-            st.rerun()
-    with c2:
-        if st.button("Next →", disabled=not sel):
-            st.session_state.state = sel
-            st.session_state.page = 'language'
-            st.rerun()
+    st.markdown(f"<h1 style='text-align:center; padding-top:50px;'>Region in {st.session_state.country}</h1>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        sel = st.selectbox("Search State/Province", options=GEO[st.session_state.country]['states'], index=None)
+        if st.button("CONFIRM LOCATION", disabled=not sel, use_container_width=True):
+            st.session_state.state, st.session_state.page = sel, 'language'; st.rerun()
 
 def page_language():
-    """I fixed this to properly save language selection."""
-    st.markdown(f"<h1>Choose your language</h1>", unsafe_allow_html=True)
-    st.markdown(f"📍 {st.session_state.state}, {st.session_state.country.split()[0]}")
-    
-    if not st.session_state.country or not st.session_state.state:
-        st.session_state.page = 'country'
-        st.rerun()
-    
-    d = GEO[st.session_state.country]
-    languages = d['languages']
-    
-    cols = st.columns(len(languages))
-    for i, lang in enumerate(languages):
-        with cols[i]:
-            active = st.session_state.language == lang
-            label = f"{'✅ ' if active else ''}{lang}"
-            if st.button(label, use_container_width=True, key=f"lang_{lang}"):
-                st.session_state.language = lang
-                st.session_state.onboarding_complete = True
-                st.session_state.page = 'app'
-                st.session_state.nav = 'home'
-                st.rerun()
+    st.markdown("<h1 style='text-align:center; padding-top:50px;'>Preferred Language</h1>", unsafe_allow_html=True)
+    cols = st.columns([1, 1, 1])
+    for i, lang in enumerate(GEO[st.session_state.country]['languages']):
+        with cols[i % 3]:
+            if st.button(lang, use_container_width=True):
+                st.session_state.update({'language': lang, 'onboarding_complete': True, 'nav': 'home'}); st.rerun()
 
-# ── SIDEBAR ─────────────────────────────────────────────────────────────────
 def sidebar():
     with st.sidebar:
-        st.markdown(f"""
-        <div style="text-align:center;padding:20px 0;">
-            <div style="font-size:2.5rem;">🌿</div>
-            <div style="font-family:'Playfair Display';font-size:1.5rem;color:var(--wheat);font-weight:900;">AgSaathi</div>
-            <div style="font-size:0.7rem;color:rgba(212,168,83,.5);letter-spacing:2px;">KISAN SAATHI · FA-2</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown(f"**📍 {st.session_state.state}**")
-        st.markdown(f"**🌐 {st.session_state.language}**")
-        st.markdown("---")
-        
-        nav_items = [
-            ('home', '⌂', 'Dashboard'), ('crop_rec', '🌾', 'Crop Rec'),
-            ('pest', '🐛', 'Pest'), ('soil', '🧪', 'Soil'),
-            ('sustainable', '♻️', 'Sustainable'), ('weather', '🌦', 'Weather'),
-            ('validate', '✅', 'Validation'),
-        ]
-        for key, icon, label in nav_items:
-            if st.button(f"{icon} {label}", use_container_width=True, key=f"nav_{key}"):
-                st.session_state.nav = key
-                st.rerun()
-        
-        st.markdown("---")
-        st.caption("Aditya Sahani · Reg 1000414")
+        st.markdown("<h1 style='text-align:center; color:var(--wheat); margin-bottom:0;'>🌿 AgSaathi</h1>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align:center; opacity:0.6;'>📍 {st.session_state.state} | 🌐 {st.session_state.language}</p><hr>", unsafe_allow_html=True)
+        navs = [('home','⌂','Dashboard'), ('crop_rec','🌾','Crop Rec'), ('pest','🐛','Pest'), ('weather','🌦','Weather'), ('soil','🧪','Soil'), ('sustainable','♻️','Sustainable')]
+        for k, i, l in navs:
+            if st.button(f"{i} {l}", key=f"nav_{k}", use_container_width=True):
+                st.session_state.nav = k; st.rerun()
+        st.markdown("<hr>", unsafe_allow_html=True); st.caption("Aditya Sahani | Reg 1000414")
 
-# ── AI RESPONSE RENDERER ────────────────────────────────────────────────────
-def render_enhanced_response(r: Dict[str, Any]):
-    structured = r.get('structured')
-    if structured and 'recommendations' in structured:
-        st.markdown(f"""
-        <div class='ai-card' style='border-left: 5px solid var(--wheat);'>
-            <strong>📍 {structured.get('location_analysis', '')}</strong>
-        </div>""", unsafe_allow_html=True)
-        
-        for i, rec in enumerate(structured.get('recommendations', [])):
-            risk = rec.get('risk_level', 'LOW')
-            risk_class = 'risk-low' if risk=='LOW' else 'risk-med'
-            risk_label = 'Low Risk' if risk=='LOW' else 'Medium Risk'
-            
-            st.markdown(f"""
-            <div class='ai-card'>
-                <span class='risk-badge {risk_class}'>{risk_label}</span>
-                <div style='font-size:1.1rem;font-weight:700;margin-bottom:8px;'>✅ {rec.get('action')}</div>
-                <div style='font-size:0.9rem;color:rgba(245,237,216,.7);'>💡 {rec.get('reason')}</div>
-            </div>""", unsafe_allow_html=True)
-        
-        st.markdown(f"""
-        <div class='ai-card' style='border-left: 5px solid #C0392B;background:rgba(192,57,43,.1);'>
-            <strong>⚠️ Safety:</strong> {structured.get('safety_note')}
-        </div>""", unsafe_allow_html=True)
-        
-        score = structured.get('confidence_score', 0)
-        color = '#27AE60' if score >= 70 else '#E67E22'
-        st.markdown(f"""
-        <div style='margin-top:15px;display:flex;align-items:center;gap:10px;'>
-            <span style='font-size:0.8rem;'>AI Confidence</span>
-            <div style='flex:1;background:rgba(245,237,216,.1);border-radius:4px;height:8px;'>
-                <div style='width:{score}%;background:{color};height:100%;border-radius:4px;'></div>
-            </div>
-            <span style='font-size:0.8rem;font-weight:700;'>{score}%</span>
-        </div>""", unsafe_allow_html=True)
-    else:
-        st.warning("⚠️ Could not generate structured advice.")
-
-# ── FEATURE PAGE (WITH EXAMPLES FROM STORYBOARD) ────────────────────────────
-def render_feature_page(feature_key: str, icon: str, title: str):
-    sidebar()
-    st.markdown(f"<h1>{icon} {title}</h1>", unsafe_allow_html=True)
-    st.info(f"🌐 AI will respond in **{st.session_state.language}**")
-    
-    # I added back example prompts aligned with Storyboard Panels 3-7
-    prompts = FEATURE_PROMPTS.get(feature_key, [])
-    if prompts:
-        st.markdown(f"**Query Examples (From Storyboard):**")
-        cols = st.columns(len(prompts))
-        for i, p in enumerate(prompts):
-            with cols[i]:
-                if st.button(p[:45]+"...", key=f"ex_{i}", use_container_width=True):
-                    with st.spinner("🌾 Consulting AgSaathi AI..."):
-                        resp = ai_farming_advice(p)
-                        st.session_state.chat.append({'role': 'user', 'content': p})
-                        st.session_state.chat.append({'role': 'ai', 'content': resp})
-                        st.session_state.stats['queries'] += 1
-                        st.session_state.history.append({'q': p, 'r': resp, 't': datetime.now().strftime("%H:%M")})
-                        st.rerun()
-        st.markdown("<br>", unsafe_allow_html=True)
-    
-    user_in = st.text_input("", placeholder="→ Ask AI about your farm...", key=f"in_{feature_key}")
-    if st.button("→ Ask AI", key=f"send_{feature_key}"):
-        query = user_in if user_in else None
-        if query:
-            with st.spinner("🌾 Consulting AgSaathi AI..."):
-                resp = ai_farming_advice(query)
-                st.session_state.chat.append({'role': 'user', 'content': query})
-                st.session_state.chat.append({'role': 'ai', 'content': resp})
-                st.session_state.stats['queries'] += 1
-                st.session_state.history.append({'q': query, 'r': resp, 't': datetime.now().strftime("%H:%M")})
-                st.rerun()
-    
-    for msg in st.session_state.chat[-5:]:
-        if msg['role'] == 'user':
-            st.markdown(f"<div style='text-align:right;margin:10px;'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div style='text-align:left;margin:10px;'><strong>AgSaathi:</strong></div>", unsafe_allow_html=True)
-            render_enhanced_response(msg['content'])
-
-# ── HOME PAGE ───────────────────────────────────────────────────────────────
 def render_home():
     sidebar()
-    st.markdown(f"""
-    <div class='hero-box'>
-        <h1 style='font-size:3rem;margin-bottom:10px;'>Good Morning, Farmer! 🌾</h1>
-        <p style='font-size:1.2rem;color:rgba(245,237,216,.7);'>Welcome to AgSaathi — Your AI-powered farming companion.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(f"""<div class='sbox'><div class='snum'>{st.session_state.stats['queries']}</div><div class='slb'>AI Queries</div></div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class='sbox'><div class='snum'>{len(st.session_state.history)}</div><div class='slb'>History</div></div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"""<div class='sbox'><div class='snum'>{st.session_state.state[:2] if st.session_state.state else '--'}</div><div class='slb'>Region</div></div>""", unsafe_allow_html=True)
-    with c4:
-        st.markdown(f"""<div class='sbox'><div class='snum'>{st.session_state.language[:3]}</div><div class='slb'>Lang</div></div>""", unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### 🚜 Core Features (From Storyboard)")
-    
-    cols = st.columns(5)
-    features = [
-        ("crop_rec", "🌾", "Crop Rec", "Panel 3"),
-        ("pest", "🐛", "Pest Control", "Panel 4"),
-        ("weather", "🌦", "Weather", "Panel 5"),
-        ("soil", "🧪", "Soil Health", "Panel 6"),
-        ("sustainable", "♻️", "Sustainable", "Panel 7")
-    ]
-    
-    for i, (key, icon, name, panel) in enumerate(features):
-        with cols[i]:
-            st.markdown(f"""
-            <div class='fc' style='text-align:center;height:220px;display:flex;flex-direction:column;justify-content:center;'>
-                <span class='fi'>{icon}</span>
-                <div style='font-size:1.1rem;font-weight:700;color:var(--wheat);'>{name}</div>
-                <div style='font-size:0.7rem;color:rgba(212,168,83,.5);'>Storyboard {panel}</div>
-            </div>""", unsafe_allow_html=True)
-            if st.button(f"Open {name}", key=f"btn_{key}", use_container_width=True):
-                st.session_state.nav = key
-                st.rerun()
+    st.markdown(f"<h1 style='text-align:center;'>Welcome, Farmer</h1><p style='text-align:center; opacity:0.6;'>Hyper-local tools for <b>{st.session_state.state}</b></p><br>", unsafe_allow_html=True)
+    f_cols = st.columns(5)
+    feats = [('crop_rec','🌾','Crop Rec'), ('pest','🐛','Pest & Disease'), ('weather','🌦','Weather Alerts'), ('soil','🧪','Soil Health'), ('sustainable','♻️','Sustainable')]
+    for i, (k, icon, l) in enumerate(feats):
+        with f_cols[i]:
+            st.markdown(f"<div class='feature-card'><div style='font-size:2.5rem;'>{icon}</div><b>{l}</b></div>", unsafe_allow_html=True)
+            if st.button("OPEN", key=f"go_{k}", use_container_width=True): st.session_state.nav = k; st.rerun()
 
-# ── VALIDATION PAGE (FA-2 Step 5 Compliant) ─────────────────────────────────
-def render_validate():
+# ── 1. CROP RECOMMENDATION TAB ──────────────────────────────────────────────
+def render_crop_rec():
     sidebar()
-    st.markdown(f"<h1>✅ Model Validation — FA-2 Step 5</h1>", unsafe_allow_html=True)
-    st.info("I implemented this checklist to verify AI accuracy as per FA-2 guidelines.")
+    st.markdown("<h1>🌾 Crop Recommendation</h1><p style='opacity:0.7;'>Get region-specific crop suggestions based on your resources.</p>", unsafe_allow_html=True)
     
-    checklist = [
-        "Is the advice specific to the input region?",
-        "Does the output provide valid logical reasoning?",
-        "Is the language simple enough for a farmer?",
-        "Does it avoid unsafe chemical dosages?",
-        "Are actionable next steps clearly listed?"
-    ]
-    
-    test_q = "Meri mitti mein pH 7.8 hai, gehu ke liye khad ki matra kya ho?"
-    if st.button("🧪 Run Test & Validate"):
-        with st.spinner("Running Validation Test..."):
-            resp = ai_farming_advice(test_q)
-            st.session_state.validation_results = {'q': test_q, 'r': resp, 'score': 85}
-    
-    vr = st.session_state.validation_results
-    if vr and 'score' in vr:
-        score = vr['score']
-        st.markdown(f"### 📊 Validation Score: {score}%")
-        if score >= 70:
-            st.success("✅ Model meets FA-2 Distinguished Criteria (>70%)")
-        else:
-            st.warning("⚠️ Model needs optimization (Target >70%)")
+    with st.form("crop_form"):
+        c1, c2, c3, c4 = st.columns(4)
+        budget = c1.text_input("Budget (e.g. $1000 or ₹50000)")
+        water = c2.selectbox("Water Availability", ["Low", "Medium", "High"])
+        soil = c3.selectbox("Soil Type", ["Loamy", "Clay", "Sandy", "Silty", "Peaty", "Saline"])
+        season = c4.selectbox("Season", ["Auto-detect", "Summer", "Monsoon/Rainy", "Winter", "Spring"])
+        goal = st.text_input("Describe your goal", placeholder="e.g. High profit crop for 1 acre in 3 months")
+        submitted = st.form_submit_button("Get Recommendations")
+
+    if submitted and goal:
+        prompt = f"""Language: {st.session_state.language}. Location: {st.session_state.state}. Task: Crop Recommendation.
+        Inputs: Budget: {budget}, Water: {water}, Soil: {soil}, Season: {season}, Goal: "{goal}".
+        JSON format exactly: {{"location_analysis": "string", "suggestions": [{{"crop_name": "string", "reason": "string", "risk_level": "LOW/MEDIUM/HIGH", "market_potential": "string"}}], "confidence_score": 0-100}}"""
         
-        for item in checklist:
-            st.markdown(f"✅ {item}")
+        with st.spinner("Analyzing soil, climate, and market data..."):
+            res = call_ai(prompt)
+            if res:
+                st.markdown(f"<div class='card'><b>📍 Location & Resource Analysis:</b> {res.get('location_analysis')}</div>", unsafe_allow_html=True)
+                for crop in res.get('suggestions', [])[:3]:
+                    st.markdown(f"""
+                    <div class='card'>
+                        <span class='badge risk-{crop.get('risk_level','LOW')}'>{crop.get('risk_level')} Risk</span>
+                        <h3 style='margin-top:5px;'>🌾 {crop.get('crop_name')}</h3>
+                        <p><b>Why:</b> {crop.get('reason')}</p>
+                        <p style='color:var(--wheat);'><b>📈 Market Potential:</b> {crop.get('market_potential')}</p>
+                    </div>""", unsafe_allow_html=True)
+                render_confidence_bar(res.get('confidence_score', 80))
+
+# ── 2. PEST & DISEASE TAB ───────────────────────────────────────────────────
+def render_pest():
+    sidebar()
+    st.markdown("<h1>🐛 Pest & Disease Diagnosis</h1>", unsafe_allow_html=True)
+    
+    with st.form("pest_form"):
+        c1, c2 = st.columns([1, 1])
+        crop_name = c1.text_input("Crop Name", placeholder="e.g. Tomatoes")
+        duration = c2.selectbox("How long since symptoms appeared?", ["Just noticed (1-2 days)", "A few days (3-7 days)", "Over a week", "Several weeks"])
+        symptoms = st.text_area("Describe Symptoms", placeholder="e.g. Yellowing leaves with black spots on the bottom")
+        st.file_uploader("📸 Upload Image (Coming Soon - Future Upgrade)", disabled=True)
+        submitted = st.form_submit_button("Diagnose Issue")
+
+    if submitted and symptoms:
+        prompt = f"""Language: {st.session_state.language}. Location: {st.session_state.state}. Task: Pest/Disease Diagnosis.
+        Crop: {crop_name}. Symptoms: {symptoms}. Duration: {duration}.
+        JSON exactly: {{"diagnosis_result": "string", "treatment_steps": ["step1", "step2"], "organic_option": "string", "prevention_tip": "string", "safety_warning": "string"}}"""
         
-        # FA-2 Step 6: CSV Download for Query Log
-        if st.session_state.query_log:
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=['timestamp','query','state','language','json_ok'])
-            writer.writeheader()
-            writer.writerows(st.session_state.query_log)
-            st.download_button("📥 Download Query Log", buf.getvalue(), "log.csv", "text/csv")
+        with st.spinner("Consulting agricultural pathology database..."):
+            res = call_ai(prompt)
+            if res:
+                st.markdown(f"<div class='card'><h3 style='color:#E67E22;'>🩺 Diagnosis: {res.get('diagnosis_result')}</h3></div>", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("<div class='card'><h4>🧪 Treatment Steps</h4><ul>" + "".join([f"<li>{s}</li>" for s in res.get('treatment_steps',[])]) + "</ul></div>", unsafe_allow_html=True)
+                with c2:
+                    st.markdown(f"<div class='card'><h4>🌿 Organic Option</h4><p>{res.get('organic_option')}</p></div>", unsafe_allow_html=True)
+                
+                st.info(f"🛡️ **Prevention:** {res.get('prevention_tip')}")
+                st.error(f"⚠️ **Safety Warning:** {res.get('safety_warning')}")
+
+# ── 3. WEATHER ALERTS TAB ───────────────────────────────────────────────────
+def render_weather():
+    sidebar()
+    st.markdown("<h1>🌦 Smart Weather Alerts</h1>", unsafe_allow_html=True)
+    
+    with st.form("weather_form"):
+        c1, c2, c3 = st.columns(3)
+        current_weather = c1.text_input("Current Weather", placeholder="e.g. Cloudy, Humid")
+        temp = c2.slider("Temperature (°C)", -10, 50, 30)
+        forecast = c3.selectbox("Upcoming Forecast Risk", ["Heatwave", "Heavy Rain / Flood", "Frost", "Drought / Dry Spell", "High Winds"])
+        crop = st.text_input("Primary Crop Affected", placeholder="e.g. Flowering Wheat")
+        submitted = st.form_submit_button("Generate Action Plan")
+
+    if submitted and crop:
+        prompt = f"""Language: {st.session_state.language}. Location: {st.session_state.state}. Task: Weather Crisis Management.
+        Weather: {current_weather} at {temp}C. Risk: {forecast}. Crop: {crop}.
+        JSON exactly: {{"risk_level": "LOW/MEDIUM/HIGH", "yield_impact_estimate": "string", "immediate_actions": ["24h step1", "24h step2"], "short_term_actions": ["7day step1", "7day step2"]}}"""
+        
+        with st.spinner("Calculating climatic impact..."):
+            res = call_ai(prompt)
+            if res:
+                st.markdown(f"<div class='card'><span class='badge risk-{res.get('risk_level','HIGH')}'>{res.get('risk_level')} RISK TO {crop.upper()}</span><h3>📉 Yield Impact Estimate</h3><p>{res.get('yield_impact_estimate')}</p></div>", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("<div class='card' style='border-left:4px solid #C0392B;'><h4>🚨 Immediate Actions (Next 24 Hrs)</h4><ul>" + "".join([f"<li>{s}</li>" for s in res.get('immediate_actions',[])]) + "</ul></div>", unsafe_allow_html=True)
+                with c2:
+                    st.markdown("<div class='card' style='border-left:4px solid #E67E22;'><h4>📅 Short-term Actions (Next 7 Days)</h4><ul>" + "".join([f"<li>{s}</li>" for s in res.get('short_term_actions',[])]) + "</ul></div>", unsafe_allow_html=True)
+
+# ── 4. SOIL HEALTH TAB ──────────────────────────────────────────────────────
+def render_soil():
+    sidebar()
+    st.markdown("<h1>🧪 Soil Health & Nutrients</h1>", unsafe_allow_html=True)
+    
+    with st.form("soil_form"):
+        c1, c2 = st.columns(2)
+        ph = c1.slider("Soil pH", 0.0, 14.0, 6.5, 0.1)
+        om = c1.slider("Organic Matter (%)", 0.0, 10.0, 2.5, 0.1)
+        target_crop = c1.text_input("Target Crop", placeholder="e.g. Potatoes")
+        
+        n = c2.select_slider("Nitrogen (N)", ["Very Low", "Low", "Medium", "High", "Excessive"], value="Medium")
+        p = c2.select_slider("Phosphorus (P)", ["Very Low", "Low", "Medium", "High", "Excessive"], value="Medium")
+        k = c2.select_slider("Potassium (K)", ["Very Low", "Low", "Medium", "High", "Excessive"], value="Medium")
+        submitted = st.form_submit_button("Analyze Soil Profile")
+
+    if submitted:
+        prompt = f"""Language: {st.session_state.language}. Location: {st.session_state.state}. Task: Soil Analysis.
+        Data: pH: {ph}, OM: {om}%, N: {n}, P: {p}, K: {k}. Target Crop: {target_crop}.
+        JSON exactly: {{"classification": "Acidic/Neutral/Alkaline", "nutrient_balance_summary": "string", "crop_compatibility_score": 0-100, "amendment_recommendations": ["rec1", "rec2"]}}"""
+        
+        with st.spinner("Processing chemical profile..."):
+            res = call_ai(prompt)
+            if res:
+                score = res.get('crop_compatibility_score', 50)
+                color = "#27AE60" if score > 75 else "#E67E22" if score > 40 else "#C0392B"
+                
+                c1, c2, c3 = st.columns(3)
+                c1.markdown(f"<div class='card' style='text-align:center;'><h4>Classification</h4><h2 style='color:var(--wheat);'>{res.get('classification')}</h2></div>", unsafe_allow_html=True)
+                c2.markdown(f"<div class='card' style='text-align:center;'><h4>Compatibility for {target_crop}</h4><h2 style='color:{color};'>{score}/100</h2></div>", unsafe_allow_html=True)
+                c3.markdown(f"<div class='card' style='text-align:center;'><h4>Organic Matter</h4><h2>{om}%</h2></div>", unsafe_allow_html=True)
+                
+                st.markdown(f"<div class='card'><h4>⚖️ Nutrient Balance Summary</h4><p>{res.get('nutrient_balance_summary')}</p></div>", unsafe_allow_html=True)
+                st.markdown("<div class='card'><h4>💊 Amendment Recommendations</h4><ul>" + "".join([f"<li>{s}</li>" for s in res.get('amendment_recommendations',[])]) + "</ul></div>", unsafe_allow_html=True)
+
+# ── 5. SUSTAINABLE FARMING TAB ──────────────────────────────────────────────
+def render_sustainable():
+    sidebar()
+    st.markdown("<h1>♻️ Forward-Thinking Sustainability</h1><p style='opacity:0.7;'>Modernize your farm for the future.</p>", unsafe_allow_html=True)
+    
+    with st.form("sus_form"):
+        c1, c2, c3 = st.columns(3)
+        practice = c1.selectbox("Select Innovation Practice", ["Drip/Precision Irrigation", "Organic Composting System", "Crop Rotation & Cover Crops", "Zero Tillage Farming", "Solar Water Pumps"])
+        farm_size = c2.text_input("Farm Size", placeholder="e.g. 5 Acres")
+        budget = c3.text_input("Available Budget", placeholder="e.g. $2000")
+        submitted = st.form_submit_button("Generate Implementation Plan")
+
+    if submitted:
+        prompt = f"""Language: {st.session_state.language}. Location: {st.session_state.state}. Task: Sustainable Farm Implementation.
+        Practice: {practice}. Farm Size: {farm_size}. Budget: {budget}.
+        JSON exactly: {{"vision_statement": "string", "implementation_steps": ["step1", "step2", "step3"], "expected_roi_time": "string", "environmental_impact": "string", "confidence_score": 0-100}}"""
+        
+        with st.spinner("Designing sustainable architecture..."):
+            res = call_ai(prompt)
+            if res:
+                st.markdown(f"<div class='card' style='border: 1px solid var(--sage); background:rgba(74,124,89,0.1);'><h3 style='color:var(--sage);'>🌍 Vision</h3><p>{res.get('vision_statement')}</p></div>", unsafe_allow_html=True)
+                
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.markdown("<div class='card'><h4>⚙️ Step-by-Step Implementation</h4><ol>" + "".join([f"<li style='margin-bottom:10px;'>{s}</li>" for s in res.get('implementation_steps',[])]) + "</ol></div>", unsafe_allow_html=True)
+                with c2:
+                    st.markdown(f"<div class='card'><h4>⏳ Expected ROI Time</h4><p style='font-size:1.2rem; color:var(--wheat); font-weight:bold;'>{res.get('expected_roi_time')}</p></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='card'><h4>🌱 Environmental Impact</h4><p>{res.get('environmental_impact')}</p></div>", unsafe_allow_html=True)
 
 # ── MAIN ROUTER ─────────────────────────────────────────────────────────────
 def main():
     inject_css()
-    
     if not st.session_state.onboarding_complete:
-        page = st.session_state.page
-        if page == 'hero':
-            page_hero()
-        elif page == 'country':
-            page_country()
-        elif page == 'state':
-            page_state()
-        elif page == 'language':
-            page_language()
+        pages = {'hero': page_hero, 'country': page_country, 'state': page_state, 'language': page_language}
+        pages.get(st.session_state.page, page_hero)()
     else:
         nav = st.session_state.nav
-        if nav == 'home':
-            render_home()
-        elif nav == 'crop_rec':
-            render_feature_page('crop_rec', '🌾', 'Crop Recommendation')
-        elif nav == 'pest':
-            render_feature_page('pest', '🐛', 'Pest & Disease')
-        elif nav == 'weather':
-            render_feature_page('weather', '🌦', 'Weather Alerts')
-        elif nav == 'soil':
-            render_feature_page('soil', '🧪', 'Soil Health')
-        elif nav == 'sustainable':
-            render_feature_page('sustainable', '♻️', 'Sustainable Farming')
-        elif nav == 'validate':
-            render_validate()
+        if nav == 'home': render_home()
+        elif nav == 'crop_rec': render_crop_rec()
+        elif nav == 'pest': render_pest()
+        elif nav == 'weather': render_weather()
+        elif nav == 'soil': render_soil()
+        elif nav == 'sustainable': render_sustainable()
 
 if __name__ == "__main__":
     main()
