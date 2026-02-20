@@ -5,8 +5,8 @@
 ![Gemini](https://img.shields.io/badge/Google_Gemini-AI-orange)
 ![Status](https://img.shields.io/badge/Assessment-FA--2-success)
 
-**Student Name:** Zene Sophie Anand 
-**Student ID:** 1000442 
+**Student Name:** Zene Sophie Anand
+**Student ID:** 1000442  
 **Course:** Generative AI  
 **School:** Aspee Nutan Academy  
 **Assessment Type:** FA-2  
@@ -14,7 +14,16 @@
 
 ---
 
-## 📋 Project Overview
+## � Project Links
+
+| Resource | Link |
+|----------|------|
+| 🚀 Live App | [Open Live App](https://idai103-1000442-zene-sophie-anand-dj2nbhahfqgcfogkut5zc4.streamlit.app/) |
+| 🎨 Canva Storyboard | [View Storyboard](https://www.canva.com/design/DAG9wn0Lpxc/KwGSYPuD3LXNNTeJulw-BA/edit) |
+
+---
+
+## �📋 Project Overview
 
 **AgSaathi** is an AI-powered smart farming assistant built using **Python**, **Streamlit**, and **Google Gemini**. It provides hyper-local agricultural intelligence to farmers across India, Canada, and Ghana — covering crop recommendations, pest & disease diagnosis, smart weather alerts, soil health analysis, and sustainable farming guidance.
 
@@ -311,6 +320,16 @@ Streamlit Cloud automatically installs dependencies and hosts the application wi
 ## 📌 Conclusion
 
 AgSaathi demonstrates the full lifecycle of a Generative AI-powered application — from structured prompt engineering and multi-module design to cloud deployment. It shows how AI can make specialized agricultural expertise universally accessible, helping farmers grow smarter and more sustainably.
+
+---
+
+## 👥 Contributors
+
+| Name | WACP No. |
+|------|----------|
+| Aditya Jitendra Kumar Sahani | 1000414 |
+| Mann Paresh Patel | 1000428 |
+| Zene Sophie Anand | 1000442 |
 
 ---
 
