@@ -18,7 +18,7 @@
 
 | Resource | Link |
 |----------|------|
-| 🚀 Live App | [Open Live App](https://idai103-1000442-zene-sophie-anand-dj2nbhahfqgcfogkut5zc4.streamlit.app/) |
+| 🚀 Live App | [Open Live App](https://idai103-1000442-zene-sophie-anand-drke8scddxqbwrbqqfcy36.streamlit.app/) |
 | 🎨 Canva Storyboard | [View Storyboard](https://www.canva.com/design/DAG9wn0Lpxc/KwGSYPuD3LXNNTeJulw-BA/edit) |
 
 ---
